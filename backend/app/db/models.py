@@ -1,27 +1,13 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from backend.app.db.database import Base
-
-
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
-
-    events = relationship("Event", back_populates="owner")
-
 
 class Event(Base):
     __tablename__ = "events"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String)
+    title = Column(String, index=True)
     description = Column(String)
-    category = Column(String)
+    category = Column(String, index=True)
     is_private = Column(Boolean, default=False)
     event_date = Column(DateTime)
-    creator_id = Column(Integer, ForeignKey("users.id"))
-
-    owner = relationship("User", back_populates="events")
+    creator_id = Column(Integer)  # Пока заглушка: просто ID создателя

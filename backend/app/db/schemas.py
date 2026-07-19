@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 class EventBase(BaseModel):
     title: str
@@ -15,19 +15,6 @@ class EventCreate(EventBase):
 class Event(EventBase):
     id: int
     creator_id: int
-
-    class Config:
-        from_attributes = True
-
-class UserBase(BaseModel):
-    email: EmailStr
-
-class UserCreate(UserBase):
-    password: str
-
-class User(UserBase):
-    id: int
-    events: List[Event] = []
 
     class Config:
         from_attributes = True

@@ -5,21 +5,14 @@ from typing import List
 from backend.app.db import crud, schemas, models
 from backend.app.db.database import engine, get_db
 
+# Создаем таблицы в БД
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Новый эндпоинт для регистрации
-@app.post("/users/", response_model=schemas.User)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = crud.get_user_by_email(db, email=user.email)
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    return crud.create_user(db=db, user=user)
-
 @app.post("/events/", response_model=schemas.Event)
 def create_event(event: schemas.EventCreate, db: Session = Depends(get_db)):
-    # Пока оставляем user_id=1, скоро заменим на получение ID из токена
+    # Временно хардкодим user_id=1, так как авторизация еще не реализована
     return crud.create_event(db=db, event=event, user_id=1)
 
 @app.get("/events/", response_model=List[schemas.Event])
