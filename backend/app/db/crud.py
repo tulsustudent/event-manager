@@ -1,12 +1,14 @@
 from sqlalchemy.orm import Session
+import bcrypt
 from passlib.context import CryptContext
 from backend.app.db import models, schemas
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def get_password_hash(password: str) -> str:
+    # Используем срез [:72], чтобы избежать ValueError из-за длины пароля
+    return bcrypt.hashpw(password[:72].encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
 def get_user_by_email(db: Session, email: str):
