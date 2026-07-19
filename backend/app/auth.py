@@ -3,6 +3,9 @@ from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException, status
 import bcrypt  # Импортируем библиотеку
+from backend.app.db import crud, database
+from backend.app.db.database import get_db
+from sqlalchemy.orm import Session
 
 SECRET_KEY = "SUPER_SECRET_KEY"
 ALGORITHM = "HS256"
@@ -32,7 +35,11 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+
+def get_current_user(
+        token: str = Depends(oauth2_scheme),
+        db: Session = Depends(get_db)
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -44,4 +51,10 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    return email
+
+    # Теперь ищем пользователя в базе
+    user = crud.get_user_by_email(db, email=email)
+    if user is None:
+        raise credentials_exception
+
+    return user  # Возвращаем объект модели User, а не email

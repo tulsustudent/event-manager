@@ -7,14 +7,9 @@ from backend.app.db import models, schemas, crud
 from backend.app.db.database import engine, get_db
 from backend.app.auth import verify_password, create_access_token, get_current_user
 
-# Создание таблиц в БД
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
-
-# Вспомогательная функция для поиска пользователя (можно также импортировать из crud)
-def get_user_by_email(db: Session, email: str):
-    return db.query(models.User).filter(models.User.email == email).first()
 
 # Регистрация
 @app.post("/users/", response_model=schemas.User)
@@ -36,41 +31,35 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
-# Создание события (привязывается к текущему пользователю)
+# Создание события
 @app.post("/events/", response_model=schemas.Event)
 def create_event(
         event: schemas.EventCreate,
         db: Session = Depends(get_db),
-        current_user_email: str = Depends(get_current_user)
+        current_user: models.User = Depends(get_current_user) # Теперь получаем объект User
 ):
-    user = get_user_by_email(db, email=current_user_email)
-    return crud.create_user_event(db=db, event=event, user_id=user.id)
+    return crud.create_user_event(db=db, event=event, user_id=current_user.id)
 
-# Чтение событий текущего пользователя
+# Чтение событий текущего пользователя (созданных им)
 @app.get("/events/", response_model=List[schemas.Event])
 def read_events(
         skip: int = 0,
         limit: int = 100,
         db: Session = Depends(get_db),
-        current_user_email: str = Depends(get_current_user)
+        current_user: models.User = Depends(get_current_user)
 ):
-    user = get_user_by_email(db, email=current_user_email)
-    return crud.get_events(db, user_id=user.id, skip=skip, limit=limit)
+    return crud.get_events(db, user_id=current_user.id, skip=skip, limit=limit)
 
 # Удаление события
 @app.delete("/events/{event_id}")
 def delete_event(
         event_id: int,
         db: Session = Depends(get_db),
-        current_user_email: str = Depends(get_current_user)
+        current_user: models.User = Depends(get_current_user)
 ):
-    user = get_user_by_email(db, email=current_user_email)
-    success = crud.delete_event(db=db, event_id=event_id, user_id=user.id)
+    success = crud.delete_event(db=db, event_id=event_id, user_id=current_user.id)
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found or you don't have permission to delete it"
-        )
+        raise HTTPException(status_code=404, detail="Event not found")
     return {"detail": "Event deleted successfully"}
 
 # Обновление события
@@ -79,13 +68,18 @@ def update_event(
         event_id: int,
         event_update: schemas.EventCreate,
         db: Session = Depends(get_db),
-        current_user_email: str = Depends(get_current_user)
+        current_user: models.User = Depends(get_current_user)
 ):
-    user = get_user_by_email(db, email=current_user_email)
-    updated_event = crud.update_event(db=db, event_id=event_id, user_id=user.id, event_update=event_update)
+    updated_event = crud.update_event(db=db, event_id=event_id, user_id=current_user.id, event_update=event_update)
     if not updated_event:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found or permission denied"
-        )
+        raise HTTPException(status_code=404, detail="Event not found")
     return updated_event
+
+# Новый эндпоинт профиля
+@app.get("/users/me/events/")
+def read_my_events(current_user: models.User = Depends(get_current_user)):
+    # Благодаря связям в модели, данные уже есть в объекте current_user
+    return {
+        "created": current_user.events,
+        "participated": current_user.participated_events
+    }

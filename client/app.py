@@ -14,13 +14,95 @@ def main(page: ft.Page):
         page.snack_bar.open = True
         page.update()
 
-    # --- Экран авторизации ---
+    def get_headers():
+        token = page.client_storage.get("token")
+        return {"Authorization": f"Bearer {token}"}
+
+    # Объявляем функции заранее, чтобы они видели друг друга
+    def show_events():
+        page.clean()
+        page.appbar = ft.AppBar(title=ft.Text("События"),
+                                actions=[ft.IconButton(ft.Icons.PERSON, on_click=lambda _: show_profile())])
+
+        list_view = ft.ListView(expand=True)
+
+        def load():
+            list_view.controls.clear()
+            res = requests.get(f"{API_URL}/events/", headers=get_headers())
+            if res.status_code == 200:
+                for ev in res.json():
+                    def delete(e, eid=ev['id']):
+                        requests.delete(f"{API_URL}/events/{eid}", headers=get_headers())
+                        load()
+
+                    list_view.controls.append(ft.ListTile(
+                        title=ft.Text(ev['title']),
+                        subtitle=ft.Text(ev['description']),
+                        trailing=ft.IconButton(ft.Icons.DELETE, on_click=delete)
+                    ))
+            page.update()
+
+        t_in = ft.TextField(label="Название")
+        d_in = ft.TextField(label="Описание")
+        cat_in = ft.Dropdown(label="Категория", options=[
+            ft.dropdown.Option("IT"), ft.dropdown.Option("Спорт"),
+            ft.dropdown.Option("Игры"), ft.dropdown.Option("Другое")
+        ])
+        date_in = ft.TextField(label="Дата (ГГГГ-ММ-ДД ЧЧ:ММ:СС)")
+
+        def create(e):
+            payload = {
+                "title": t_in.value,
+                "description": d_in.value,
+                "category": cat_in.value,
+                "event_date": date_in.value.replace(" ", "T") if date_in.value else None
+            }
+            res = requests.post(f"{API_URL}/events/", headers=get_headers(), json=payload)
+            if res.status_code == 200:
+                t_in.value = d_in.value = date_in.value = ""
+                cat_in.value = None
+                load()
+            else:
+                show_error("Ошибка создания")
+
+        page.add(t_in, d_in, cat_in, date_in, ft.ElevatedButton("Создать событие", icon=ft.Icons.ADD, on_click=create),
+                 list_view)
+        load()
+
+    def show_profile(e=None):
+        page.clean()
+        page.appbar = ft.AppBar(title=ft.Text("Мой профиль"),
+                                leading=ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: show_events()))
+
+        def delete_from_profile(e, eid):
+            requests.delete(f"{API_URL}/events/{eid}", headers=get_headers())
+            show_profile()
+
+        res = requests.get(f"{API_URL}/users/me/events/", headers=get_headers())
+        if res.status_code == 200:
+            data = res.json()
+            created_list = ft.ListView(expand=True)
+            for ev in data['created']:
+                created_list.controls.append(ft.ListTile(
+                    title=ft.Text(ev['title']),
+                    subtitle=ft.Text(ev['category']),
+                    trailing=ft.IconButton(ft.Icons.DELETE,
+                                           on_click=lambda e, eid=ev['id']: delete_from_profile(e, eid))
+                ))
+
+            joined_list = ft.ListView(expand=True)
+            for ev in data['participated']:
+                joined_list.controls.append(ft.ListTile(title=ft.Text(ev['title'])))
+
+            page.add(ft.Text("Созданные:", weight="bold"), created_list, ft.Divider(),
+                     ft.Text("Участие:", weight="bold"), joined_list)
+        page.update()
+
     def show_auth():
+        page.appbar = None
         page.clean()
         u_in = ft.TextField(label="Email")
         p_in = ft.TextField(label="Пароль", password=True)
-
-        # Переключатель режима
         mode = "login"
 
         def toggle_mode(e):
@@ -37,61 +119,17 @@ def main(page: ft.Page):
                     page.client_storage.set("token", res.json()["access_token"])
                     show_events()
                 else:
-                    show_error("Ошибка входа: неверные данные")
+                    show_error("Ошибка входа")
             else:
-                # Регистрация использует эндпоинт /users/
                 res = requests.post(f"{API_URL}/users/", json={"email": u_in.value, "password": p_in.value})
                 if res.status_code == 200:
-                    page.snack_bar = ft.SnackBar(content=ft.Text("Регистрация успешна! Теперь войдите."))
-                    page.snack_bar.open = True
-                    toggle_mode(None)  # Переключаем обратно на логин
+                    toggle_mode(None)
                 else:
-                    show_error("Ошибка регистрации: возможно, email уже занят")
+                    show_error("Ошибка регистрации")
 
         btn_action = ft.ElevatedButton("Войти", on_click=submit)
         btn_toggle = ft.TextButton("Нет аккаунта? Регистрация", on_click=toggle_mode)
-
         page.add(u_in, p_in, btn_action, btn_toggle)
-
-    # --- Экран событий ---
-    def show_events():
-        page.clean()
-        token = page.client_storage.get("token")
-        headers = {"Authorization": f"Bearer {token}"}
-
-        list_view = ft.ListView(expand=True)
-
-        def load():
-            list_view.controls.clear()
-            res = requests.get(f"{API_URL}/events/", headers=headers)
-            if res.status_code == 200:
-                for ev in res.json():
-                    # Удаление
-                    def delete(e, eid=ev['id']):
-                        requests.delete(f"{API_URL}/events/{eid}", headers=headers)
-                        load()
-
-                    list_view.controls.append(ft.ListTile(
-                        title=ft.Text(ev['title']),
-                        subtitle=ft.Text(ev['description']),
-                        trailing=ft.IconButton(ft.Icons.DELETE, on_click=delete)
-                    ))
-            page.update()
-
-        # Создание
-        t_in = ft.TextField(label="Название")
-        d_in = ft.TextField(label="Описание")
-        cat_in = ft.TextField(label="Категория")
-        date_in = ft.TextField(label="Дата (ГГГГ-ММ-ДД ТЧЧ:ММ:СС)")
-
-        def create(e):
-            data = {"title": t_in.value, "description": d_in.value, "category": cat_in.value,
-                    "event_date": date_in.value}
-            requests.post(f"{API_URL}/events/", headers=headers, json=data)
-            load()
-
-        page.add(t_in, d_in, cat_in, date_in, ft.ElevatedButton("Создать", on_click=create), list_view)
-        load()
 
     show_auth()
 
