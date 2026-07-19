@@ -1,8 +1,6 @@
-from pydantic import BaseModel
+from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
-from datetime import datetime
-from typing import List, Optional
 
 class EventBase(BaseModel):
     title: str
