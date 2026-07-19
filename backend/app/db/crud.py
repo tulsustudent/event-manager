@@ -1,84 +1,120 @@
 from sqlalchemy.orm import Session
-import bcrypt
-from backend.app.db import models, schemas
-import logging
+from sqlalchemy.orm import joinedload
+from passlib.context import CryptContext
 
-logger = logging.getLogger(__name__)
+from . import models, schemas
 
-# --- Авторизация ---
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-def get_password_hash(password: str) -> str:
-    return bcrypt.hashpw(password[:72].encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password[:72].encode('utf-8'), hashed_password.encode('utf-8'))
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    return pwd_context.verify(plain_password, password_hash)
 
-def get_user_by_email(db: Session, email: str):
-    logger.info(f"Querying user by email: {email}")
-    return db.query(models.User).filter(models.User.email == email).first()
 
-def create_user(db: Session, user: schemas.UserCreate):
-    hashed_password = get_password_hash(user.password)
-    db_user = models.User(email=user.email, hashed_password=hashed_password)
+def hash_password(plain_password: str) -> str:
+    return pwd_context.hash(plain_password)
+
+
+# ====================== USER CRUD ======================
+def get_user_by_username(db: Session, username: str):
+    return db.query(models.User).filter(models.User.username == username).first()
+
+
+def get_user_by_id(db: Session, user_id: int):
+    return db.query(models.User).filter(models.User.id == user_id).first()
+
+
+def create_user(db: Session, user: schemas.UserCreate) -> models.User:
+    """Создание пользователя с хешированием пароля."""
+    db_user = models.User(
+        username=user.username,
+        password_hash=hash_password(user.password)
+    )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    logger.info(f"User created in DB with ID: {db_user.id}")
     return db_user
 
-# --- События ---
+
+# ====================== EVENT CRUD ======================
+def get_event_by_id(db: Session, event_id: int):
+    # Загружаем участников сразу
+    return db.query(models.Event).options(joinedload(models.Event.participants)).filter(
+        models.Event.id == event_id
+    ).first()
+
 
 def create_user_event(db: Session, event: schemas.EventCreate, user_id: int):
-    db_event = models.Event(**event.model_dump(), creator_id=user_id)
+    """Создание события через CRUD"""
+    db_event = models.Event(
+        title=event.title,
+        description=event.description,
+        is_private=event.is_private,
+        event_date=event.event_date,
+        category=event.category,
+        creator_id=user_id
+    )
     db.add(db_event)
     db.commit()
     db.refresh(db_event)
-    logger.info(f"Event '{event.title}' created by user_id: {user_id}")
     return db_event
 
-# Получение созданных пользователем событий
-def get_user_created_events(db: Session, user_id: int):
-    logger.info(f"Fetching created events for user_id: {user_id}")
-    return db.query(models.Event).filter(models.Event.creator_id == user_id).all()
 
-def delete_event(db: Session, event_id: int, user_id: int):
-    event = db.query(models.Event).filter(
-        models.Event.id == event_id,
-        models.Event.creator_id == user_id
-    ).first()
-    if event:
-        db.delete(event)
-        db.commit()
-        logger.info(f"Event ID {event_id} deleted by user_id: {user_id}")
-        return True
-    logger.warning(f"Failed to delete event ID {event_id}: Not found or access denied for user_id: {user_id}")
-    return False
-
-def update_event(db: Session, event_id: int, user_id: int, event_update: schemas.EventCreate):
-    db_event = db.query(models.Event).filter(
-        models.Event.id == event_id,
-        models.Event.creator_id == user_id
-    ).first()
+def update_event(db: Session, event_id: int, event_update: schemas.EventUpdate):
+    """Частичное обновление события — меняются только переданные поля."""
+    db_event = db.query(models.Event).filter(models.Event.id == event_id).first()
     if not db_event:
-        logger.warning(f"Failed to update event ID {event_id}: Not found or access denied for user_id: {user_id}")
         return None
 
-    for key, value in event_update.model_dump().items():
-        setattr(db_event, key, value)
+    update_data = event_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_event, field, value)
 
     db.commit()
     db.refresh(db_event)
-    logger.info(f"Event ID {event_id} updated by user_id: {user_id}")
     return db_event
 
-def get_user_profile_data(db: Session, user_id: int):
-    logger.info(f"Fetching profile data for user_id: {user_id}")
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    return {
-        "created": user.events,
-        "participated": user.participated_events
-    }
 
-def get_events(db: Session, user_id: int, skip: int = 0, limit: int = 100):
-    logger.info(f"Fetching events list (skip={skip}, limit={limit})")
-    return db.query(models.Event).offset(skip).limit(limit).all()
+def delete_event(db: Session, event_id: int) -> bool:
+    """Удаление события"""
+    db_event = db.query(models.Event).filter(models.Event.id == event_id).first()
+    if db_event:
+        db.delete(db_event)
+        db.commit()
+        return True
+    return False
+
+
+# ====================== PARTICIPANT CRUD ======================
+def add_participant(db: Session, event_id: int, user_id: int):
+    """Добавление участника"""
+    exists = db.query(models.EventParticipant).filter(
+        models.EventParticipant.event_id == event_id,
+        models.EventParticipant.user_id == user_id
+    ).first()
+    if exists:
+        return exists
+
+    db_participant = models.EventParticipant(
+        event_id=event_id,
+        user_id=user_id,
+        username=get_user_by_id(db, user_id).username
+    )
+    db.add(db_participant)
+    db.commit()
+    db.refresh(db_participant)
+    return db_participant
+
+
+def remove_participant(db: Session, event_id: int, user_id: int) -> bool:
+    """Удаление участника"""
+    db_participant = db.query(models.EventParticipant).filter(
+        models.EventParticipant.event_id == event_id,
+        models.EventParticipant.user_id == user_id
+    ).first()
+
+    if db_participant:
+        db.delete(db_participant)
+        db.commit()
+        return True
+    return False

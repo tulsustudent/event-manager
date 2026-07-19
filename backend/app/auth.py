@@ -1,60 +1,73 @@
+import os
+import logging
+from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
-from jose import JWTError, jwt
+from typing import Optional
+from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
-from fastapi import Depends, HTTPException, status
-import bcrypt  # Импортируем библиотеку
-from backend.app.db import crud, database
-from backend.app.db.database import get_db
 from sqlalchemy.orm import Session
 
-SECRET_KEY = "SUPER_SECRET_KEY"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Импортируем явно через пакет
+from backend.app.db.database import get_db
+from backend.app.db import crud, models
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+logger = logging.getLogger(__name__)
 
-# Переписанные функции с использованием bcrypt напрямую
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    # Проверка пароля: декодируем хэш обратно в байты для bcrypt
-    return bcrypt.checkpw(
-        plain_password[:72].encode('utf-8'),
-        hashed_password.encode('utf-8')
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = "dev-only-insecure-secret-key"
+    logger.warning(
+        "SECRET_KEY не задан в окружении! Используется небезопасный дефолт — "
+        "только для локальной разработки. Установи переменную окружения SECRET_KEY перед деплоем/сдачей."
     )
 
-def get_password_hash(password: str) -> str:
-    # Хэширование: обрезаем до 72 символов, как требует bcrypt
-    return bcrypt.hashpw(
-        password[:72].encode('utf-8'),
-        bcrypt.gensalt()
-    ).decode('utf-8')
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+
+# auto_error=False — чтобы можно было построить опциональную авторизацию поверх той же схемы
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
+
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    # Используем timezone.utc вместо устаревшего utcnow
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(
-        token: str = Depends(oauth2_scheme),
-        db: Session = Depends(get_db)
-):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-    )
+def _decode_user(token: str, db: Session) -> Optional[models.User]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
     except JWTError:
-        raise credentials_exception
+        return None
 
-    # Теперь ищем пользователя в базе
-    user = crud.get_user_by_email(db, email=email)
+    username: str = payload.get("sub")
+    if username is None:
+        return None
+
+    return crud.get_user_by_username(db, username=username)
+
+
+def get_current_user(
+        token: Optional[str] = Depends(oauth2_scheme),
+        db: Session = Depends(get_db)
+):
+    if not token:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+
+    user = _decode_user(token, db)
     if user is None:
-        raise credentials_exception
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
 
-    return user  # Возвращаем объект модели User, а не email
+    return user
+
+
+def get_current_user_optional(
+        token: Optional[str] = Depends(oauth2_scheme),
+        db: Session = Depends(get_db)
+) -> Optional[models.User]:
+    """Как get_current_user, но не требует токен — вернёт None, если его нет или он невалиден.
+    Используется там, где эндпоинт доступен и анонимно (например, поиск событий)."""
+    if not token:
+        return None
+    return _decode_user(token, db)

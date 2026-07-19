@@ -1,41 +1,73 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime, Table # Добавили Table
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime
 from sqlalchemy.orm import relationship
-from backend.app.db.database import Base
+from .database import Base
 
-# Таблица для связи "участники - события"
-event_participants = Table(
-    "event_participants",
-    Base.metadata,
-    Column("user_id", ForeignKey("users.id"), primary_key=True),
-    Column("event_id", ForeignKey("events.id"), primary_key=True),
-)
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
+    username = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
 
-    events = relationship("Event", back_populates="owner")
-    # Добавляем связь для участия
-    participated_events = relationship(
-        "Event", secondary=event_participants, back_populates="participants"
+    # События, созданные пользователем
+    events = relationship(
+        "Event",
+        back_populates="creator",
+        cascade="all, delete-orphan",
+        lazy="selectin"  # Улучшает загрузку
     )
+
+    # Участие пользователя в событиях
+    participations = relationship(
+        "EventParticipant",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+
 
 class Event(Base):
     __tablename__ = "events"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String)
-    description = Column(String)
-    category = Column(String)
-    is_private = Column(Boolean, default=False)
-    event_date = Column(DateTime)
-    creator_id = Column(Integer, ForeignKey("users.id"))
+    title = Column(String, index=True, nullable=False)
+    description = Column(String, nullable=False)
+    is_private = Column(Boolean, default=False, nullable=False)
 
-    owner = relationship("User", back_populates="events")
-    # Добавляем связь для участников
+    # Новые поля
+    event_date = Column(DateTime, nullable=False)  # Обязательное поле
+    category = Column(String, index=True, nullable=False)  # Категория обязательна
+
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Связи
     participants = relationship(
-        "User", secondary=event_participants, back_populates="participated_events"
+        "EventParticipant",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        lazy="selectin"
     )
+    creator = relationship("User", back_populates="events")
+
+
+class EventParticipant(Base):
+    __tablename__ = "event_participants"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    username = Column(String, index=True, nullable=False)  # для удобства отображения
+
+    # Связи
+    event = relationship("Event", back_populates="participants")
+    user = relationship("User", back_populates="participations")
+
+
+# Индексы для производительности
+from sqlalchemy import Index
+
+Index('ix_event_date', Event.event_date)
+Index('ix_event_category', Event.category)
+Index('ix_participant_event_user', EventParticipant.event_id, EventParticipant.user_id, unique=True)

@@ -1,33 +1,83 @@
-from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from typing import Optional, List
 
-class EventBase(BaseModel):
-    title: str
-    description: str
-    category: str
-    is_private: bool = False
-    event_date: datetime
+from pydantic import BaseModel, Field
 
-class EventCreate(EventBase):
-    pass
 
-class Event(EventBase):
+# ====================== USER SCHEMAS ======================
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=100)
+
+
+class UserLogin(BaseModel):
+    """Отдельная схема для логина — здесь мы не проверяем стойкость пароля,
+    а только то, что оба поля переданы. Проверка длины пароля уместна при
+    регистрации (политика для новых паролей), но не при входе — иначе
+    пользователь с уже существующим (гипотетически более старым, коротким)
+    паролем не смог бы залогиниться вовсе."""
+    username: str
+    password: str
+
+
+class UserResponse(BaseModel):
     id: int
-    creator_id: int
+    username: str
 
     class Config:
         from_attributes = True
 
-class UserBase(BaseModel):
-    email: EmailStr
 
-class UserCreate(UserBase):
-    password: str
-
-class User(UserBase):
+# ====================== PARTICIPANT SCHEMAS ======================
+class EventParticipantResponse(BaseModel):
     id: int
-    events: List[Event] = []
+    event_id: int
+    user_id: int
+    username: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ====================== EVENT SCHEMAS ======================
+class EventCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(..., max_length=1000)
+    is_private: bool = False
+    category: str = Field(..., min_length=1, max_length=100)
+    event_date: datetime = Field(...)  # Обязательная дата в будущем
+
+
+class EventResponse(BaseModel):
+    id: int
+    title: str
+    description: str
+    is_private: bool
+    creator_id: int
+    event_date: datetime
+    category: Optional[str] = None
+
+    # Участники
+    participants: List[EventParticipantResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class EventUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+    is_private: Optional[bool] = None
+    category: Optional[str] = Field(None, min_length=1, max_length=100)
+    event_date: Optional[datetime] = None
+
+
+# Для статистики и других ответов
+class EventSimpleResponse(BaseModel):
+    id: int
+    title: str
+    event_date: datetime
+    category: Optional[str] = None
 
     class Config:
         from_attributes = True
