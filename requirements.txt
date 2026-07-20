@@ -9,6 +9,7 @@ python-dotenv
 redis
 flet
 requests
+asyncpg
 
 pytest
 pytest-cov

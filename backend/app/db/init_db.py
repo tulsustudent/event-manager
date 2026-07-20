@@ -1,20 +1,20 @@
-from .database import engine, Base
-# Импортируем ВСЕ модели, чтобы они зарегистрировались
-from .models import User, Event, EventParticipant
-
+from backend.app.db.database import Base, SQLALCHEMY_DATABASE_URL
+# Импортируем из того же файла db/models.py
+from backend.app.db.models import User, Event, EventParticipant
+from sqlalchemy import create_engine
 
 def init_db(drop_all: bool = False):
-    """
-    Инициализация базы данных.
-    drop_all=True — опасно, только для разработки!
-    """
-    if drop_all:
-        print("⚠️ Удаление всех таблиц...")
-        Base.metadata.drop_all(bind=engine)
-        print("✅ Таблицы удалены.")
+    # Создаем синхронную версию строки подключения (заменяем асинхронный драйвер на psycopg2)
+    sync_url = SQLALCHEMY_DATABASE_URL.replace("+asyncpg", "+psycopg2")
 
-    print("🛠 Создание таблиц...")
-    Base.metadata.create_all(bind=engine)
+    # Создаем временный СИНХРОННЫЙ движок
+    sync_engine = create_engine(sync_url)
+
+    print("🛠 Создание таблиц (синхронный режим)...")
+    if drop_all:
+        Base.metadata.drop_all(bind=sync_engine)
+
+    Base.metadata.create_all(bind=sync_engine)
     print("✅ База данных успешно инициализирована!")
 
 
